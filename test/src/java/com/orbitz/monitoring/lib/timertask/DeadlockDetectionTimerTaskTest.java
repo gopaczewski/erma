@@ -8,8 +8,9 @@ import com.orbitz.monitoring.test.MockMonitorProcessor;
 import com.orbitz.monitoring.test.MockMonitorProcessorFactory;
 import junit.framework.TestCase;
 
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
+import java.lang.management.ManagementFactory;
 
 /**
  * Created by IntelliJ IDEA.
@@ -50,13 +51,32 @@ public class DeadlockDetectionTimerTaskTest extends TestCase {
     }
 
     public void testDeadlock() throws Exception {
-        ExecutorService executor = Executors.newFixedThreadPool(2);
+        if (! ManagementFactory.getThreadMXBean().isThreadContentionMonitoringSupported()) {
+            System.out.println("Skipping test, thread contention monitoring not supported in this vm");
+            return;
+        }
+
+        DeadlockController controller = new DeadlockController();
         Object obj1 = new Object();
         Object obj2 = new Object();
-        executor.execute(new Deadlocker(obj1, obj2));
-        executor.execute(new Deadlocker(obj2, obj1));
-        Thread.sleep(12);
+
+        Thread thread1 = new Thread(new Deadlocker(controller, obj1, obj2));
+        Thread thread2 = new Thread(new Deadlocker(controller, obj2, obj1));
+
+        thread1.start();
+        thread2.start();
+
+        controller.waitForTwo();
+        while(! thread1.getState().equals(Thread.State.BLOCKED)) {
+            Thread.sleep(10);
+        }
+
+        while(! thread2.getState().equals(Thread.State.BLOCKED)) {
+            Thread.sleep(10);
+        }
+
         task.run();
+
         Monitor[] monitors = processor.extractProcessObjects();
         boolean deadlockFound = false;
         for (Monitor monitor: monitors) {
@@ -81,9 +101,11 @@ public class DeadlockDetectionTimerTaskTest extends TestCase {
 
         private Object a;
         private Object b;
+        private DeadlockController controller;
 
-        public Deadlocker(Object a, Object b) {
+        public Deadlocker(DeadlockController controller, Object a, Object b) {
             super();
+            this.controller = controller;
             this.a = a;
             this.b = b;
         }
@@ -91,15 +113,23 @@ public class DeadlockDetectionTimerTaskTest extends TestCase {
         public void run() {
             synchronized (a) {
                 try {
-                    Thread.sleep(10);
+                    controller.iHaveALock();
+                    controller.waitForTwo();
                 } catch (Exception doNothing) { }
                 synchronized (b) {
-                    try {
-                        Thread.sleep(10);
-                    } catch (Exception doNothing) { }
+                    ; // never gonna get here...
                 }
             }
         }
     }
 
+    class DeadlockController {
+        private CountDownLatch latch = new CountDownLatch(2);
+
+        public void iHaveALock() { latch.countDown(); }
+
+        public void waitForTwo() throws Exception {
+            latch.await();
+        }
+    }
 }
