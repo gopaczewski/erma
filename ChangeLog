@@ -1,3 +1,6 @@
+Version 3.2:
+ * ERMA-2: Calls to TransactionMonitor.done() out of order on nested monitors results in double processing
+
 Version 3.1:
  * Initial GitHub version
  * ERMA-1: AsyncMonitorProcessor forwards startup/shutdown

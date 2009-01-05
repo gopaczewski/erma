@@ -95,22 +95,16 @@ public class TransactionMonitorTest extends CompositeMonitorTestBase {
         parent.succeeded();
         parent.done();
 
-        processor.assertExpectedProcessObject(childsChild);
-        processor.assertExpectedProcessObject(child);
         processor.assertExpectedProcessObject(parent);
         processor.assertNoUnexpectedCalls();
 
         new TransactionMonitor("unrelated").done();
 
-        assertNotNull("For child's children", child.getChildMonitors());
         Iterator childMonitors = child.getChildMonitors().iterator();
-        assertSame("For child", childsChild, childMonitors.next());
-        assertFalse("More children", childMonitors.hasNext());
+        assertFalse("Has children", childMonitors.hasNext());
 
-        assertNotNull("For parent's children", parent.getChildMonitors());
         childMonitors = parent.getChildMonitors().iterator();
-        assertSame("For child", child, childMonitors.next());
-        assertFalse("More children", childMonitors.hasNext());
+        assertFalse("Has children", childMonitors.hasNext());
     }
 
     public void testSettingInheritableAttributeAsNull() {

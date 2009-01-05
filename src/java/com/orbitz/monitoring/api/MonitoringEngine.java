@@ -347,8 +347,7 @@ public class MonitoringEngine {
                 StackFrame stackFrame = (StackFrame) stack.removeLast();
                 CompositeMonitor missedMonitor = stackFrame.getCompositeMonitor();
                 String name = (String) missedMonitor.get(Monitor.NAME);
-                log.warn("unfinished child monitor \""+name+"\" found so will process now and remove; app is fine");
-                process(missedMonitor);
+                log.warn("unfinished child monitor \""+name+"\" found; missing or out-of-order call to done(); app is fine");
             }
 
             stack.removeLast();
