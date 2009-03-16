@@ -2,20 +2,18 @@ package com.orbitz.monitoring.lib.timertask;
 
 import com.orbitz.monitoring.api.Monitor;
 import com.orbitz.monitoring.lib.BaseMonitoringEngineManager;
-import com.orbitz.monitoring.lib.processor.MonitorProcessorAdapter;
 import com.orbitz.monitoring.test.MockDecomposer;
+import com.orbitz.monitoring.test.MockMonitorProcessor;
 import com.orbitz.monitoring.test.MockMonitorProcessorFactory;
 import junit.framework.TestCase;
 
 import javax.management.MBeanServer;
-import javax.management.ObjectName;
 import javax.management.MBeanServerFactory;
+import javax.management.ObjectName;
 import java.lang.management.ManagementFactory;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.TimerTask;
 import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.TimerTask;
 
 /**
  * Test cases for MBeanPollerTimerTask
@@ -24,11 +22,11 @@ import java.math.BigDecimal;
  */
 public class MBeanPollerTimerTaskTest extends TestCase {
 
-    BrowsableMonitorProcessor processor;
+    private MockMonitorProcessor processor;
 
     @Override
     public void setUp() {
-        processor = new BrowsableMonitorProcessor();
+        processor = new MockMonitorProcessor();
 
         MockMonitorProcessorFactory mockMonitorProcessorFactory =
                 new MockMonitorProcessorFactory(processor);
@@ -70,7 +68,7 @@ public class MBeanPollerTimerTaskTest extends TestCase {
         timerTask.setObjectNames(Arrays.asList(new ObjectName("MBeanPollerTimerTaskTest:*")));
         timerTask.run();
 
-        assertEquals(1, processor.getProcessedMonitors().size());
+        assertEquals(1, processor.getProcessObjects().length);
         assertMonitorFired("MBeanPollerTimerTaskTest:type=myStandardMBean",
                 new String[] {"Value"},
                 new Integer[] {101});
@@ -82,7 +80,7 @@ public class MBeanPollerTimerTaskTest extends TestCase {
         processor.clear();
         timerTask.run();
 
-        assertEquals(2, processor.getProcessedMonitors().size());
+        assertEquals(2, processor.getProcessObjects().length);
         assertMonitorFired("MBeanPollerTimerTaskTest:type=myStandardMBean",
                 new String[] {"Value"},
                 new Integer[] {101});
@@ -94,14 +92,14 @@ public class MBeanPollerTimerTaskTest extends TestCase {
         processor.clear();
         timerTask.setObjectNames(Arrays.asList(new ObjectName("MBeanPollerTimerTaskTest:type=myStandardMBean")));
         timerTask.run();
-        assertEquals(1, processor.getProcessedMonitors().size());
+        assertEquals(1, processor.getProcessObjects().length);
 
         // query for both object names explicitly
         processor.clear();
         timerTask.setObjectNames(Arrays.asList(new ObjectName("MBeanPollerTimerTaskTest:type=myStandardMBean"),
                     new ObjectName("MBeanPollerTimerTaskTest:type=myStandardMBean,foo=bar")));
         timerTask.run();
-        assertEquals(2, processor.getProcessedMonitors().size());
+        assertEquals(2, processor.getProcessObjects().length);
     }
 
     public void testNoDuplicateMonitorsForOverlappingQueries() throws Exception {
@@ -116,7 +114,7 @@ public class MBeanPollerTimerTaskTest extends TestCase {
                 new ObjectName("MBeanPollerTimerTaskTest:*"),
                 new ObjectName("MBeanPollerTimerTaskTest:type=myStandardMBean,foo=bar")));
         timerTask.run();
-        assertEquals(1, processor.getProcessedMonitors().size());
+        assertEquals(1, processor.getProcessObjects().length);
     }
 
     public void testFindNoMBeans() throws Exception {
@@ -127,7 +125,7 @@ public class MBeanPollerTimerTaskTest extends TestCase {
                 new ObjectName("notthere:*"),
                 new ObjectName("*:type=xxx,*")));
         timerTask.run();
-        assertEquals(0, processor.getProcessedMonitors().size());
+        assertEquals(0, processor.getProcessObjects().length);
     }
 
     public void testAllowedAttributeTypes() throws Exception {
@@ -140,9 +138,9 @@ public class MBeanPollerTimerTaskTest extends TestCase {
 
         timerTask.setObjectNames(Arrays.asList(new ObjectName("MBeanPollerTimerTaskTest:*")));
         timerTask.run();
-        assertEquals(1, processor.getProcessedMonitors().size());
+        assertEquals(1, processor.getProcessObjects().length);
 
-        Monitor monitor = processor.getProcessedMonitors().get(0);
+        Monitor monitor = processor.getProcessObjects()[0];
         assertTrue(monitor.hasAttribute("Number"));
         assertTrue(monitor.hasAttribute("Boolean"));
         assertFalse(monitor.hasAttribute("Object"));
@@ -153,9 +151,8 @@ public class MBeanPollerTimerTaskTest extends TestCase {
     }
 
     private void assertMonitorFired(String monitorName, String[] attributes, Object[] values) {
-        List<Monitor> monitors = processor.getProcessedMonitors();
         Monitor match = null;
-        for (Monitor monitor : monitors) {
+        for (Monitor monitor : processor.getProcessObjects()) {
             String name = monitor.getAsString(Monitor.NAME);
             if (monitorName.equals(name)) {
                 match = monitor;
@@ -209,22 +206,6 @@ public class MBeanPollerTimerTaskTest extends TestCase {
 
         public boolean getBoolean() {
             return false;
-        }
-    }
-
-    private class BrowsableMonitorProcessor extends MonitorProcessorAdapter {
-        private List<Monitor> processedMonitors = new ArrayList<Monitor>();
-
-        public void process(Monitor monitor) {
-            processedMonitors.add(monitor);
-        }
-
-        public List<Monitor> getProcessedMonitors() {
-            return processedMonitors;
-        }
-
-        public void clear() {
-            processedMonitors.clear();
         }
     }
 }

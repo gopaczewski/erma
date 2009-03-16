@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.TimerTask;
 import java.util.Date;
+import java.lang.management.ManagementFactory;
 
 /**
  * <p>
@@ -32,6 +33,13 @@ public class MBeanPollerTimerTask extends TimerTask {
 
     private MBeanServer mbeanServer;
     private List<ObjectName> objectNames;
+
+    /**
+     * Default constructor.  Uses the platform mbean server.
+     */
+    public MBeanPollerTimerTask() {
+        this(ManagementFactory.getPlatformMBeanServer());
+    }
 
     /**
      * Constructor.
@@ -84,29 +92,33 @@ public class MBeanPollerTimerTask extends TimerTask {
             String monitorName = mbean.toString().replace(',', '+');
             EventMonitor monitor = new EventMonitor(monitorName);
 
-            for (MBeanAttributeInfo attributeInfo : mbeanInfo.getAttributes()) {
-                String attributeName = attributeInfo.getName();
-
-                try {
-                    Object attributeValue = mbeanServer.getAttribute(mbean, attributeName);
-                    if (attributeValue != null &&
-                            isAllowedAttributeType(attributeValue.getClass())) {
-                        monitor.set(attributeName, attributeValue);
-                    }
-                } catch (JMException e) {
-                    if (log.isDebugEnabled()) {
-                        log.debug("failed to get mbean attribute: " + mbean + "." +
-                                attributeName, e);
-                    }
-                } catch (RuntimeMBeanException e) {
-                    if (log.isDebugEnabled()) {
-                        log.debug("failed to get mbean attribute: " + mbean + "." +
-                                attributeName, e);
-                    }
-                }
-            }
+            extractMbeanAttributes(mbean, mbeanInfo, monitor);
 
             monitor.fire();
+        }
+    }
+
+    private void extractMbeanAttributes(ObjectName mbean, MBeanInfo mbeanInfo, EventMonitor monitor) {
+        for (MBeanAttributeInfo attributeInfo : mbeanInfo.getAttributes()) {
+            String attributeName = attributeInfo.getName();
+
+            try {
+                Object attributeValue = mbeanServer.getAttribute(mbean, attributeName);
+                if (attributeValue != null &&
+                        isAllowedAttributeType(attributeValue.getClass())) {
+                    monitor.set(attributeName, attributeValue);
+                }
+            } catch (JMException e) {
+                if (log.isDebugEnabled()) {
+                    log.debug("failed to get mbean attribute: " + mbean + "." +
+                            attributeName, e);
+                }
+            } catch (RuntimeMBeanException e) {
+                if (log.isDebugEnabled()) {
+                    log.debug("failed to get mbean attribute: " + mbean + "." +
+                            attributeName, e);
+                }
+            }
         }
     }
 
@@ -119,6 +131,7 @@ public class MBeanPollerTimerTask extends TimerTask {
                 Character.class.isAssignableFrom(clazz) ||
                 Boolean.class.isAssignableFrom(clazz) ||
                 String.class.isAssignableFrom(clazz) ||
+                Byte.class.isAssignableFrom(clazz) ||
                 Date.class.isAssignableFrom(clazz));
     }
 }

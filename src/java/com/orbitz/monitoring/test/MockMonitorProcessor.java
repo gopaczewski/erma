@@ -165,6 +165,11 @@ public class MockMonitorProcessor implements MonitorProcessor {
     }
 
     // ** ACCESSORS ***********************************************************
+
+    public Monitor[] getProcessObjects() {
+        return (Monitor[]) _processObjects.toArray(new Monitor[_processObjects.size()]);
+    }
+
     public int getProcessDelay() {
         return _processDelay;
     }
