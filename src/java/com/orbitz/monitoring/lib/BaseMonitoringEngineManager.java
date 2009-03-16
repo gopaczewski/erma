@@ -63,7 +63,7 @@ public class BaseMonitoringEngineManager {
         MonitoringEngine.getInstance().setStartupRunnable(_startupRunnable);
 
         if (_timerTasks == null) {
-            _timerTasks = Collections.emptyMap();
+            _timerTasks = Collections.EMPTY_MAP;
         }
 
         MonitoringEngine.getInstance().startup();
@@ -117,6 +117,11 @@ public class BaseMonitoringEngineManager {
      */
     public void setTimerTasksMap(Map timerTasks) {
         _timerTasks = timerTasks;
+    }
+
+    public Collection getTimerTasks() {
+        return (_timerTasks != null && _timerTasks.containsKey(new Integer(60000))) ?
+                (Collection) _timerTasks.get(new Integer(60000)) : Collections.EMPTY_SET;
     }
 
     /**
