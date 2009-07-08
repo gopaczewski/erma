@@ -25,7 +25,15 @@ public class TimeWindowMonitorThrottleTest extends TestCase {
             throws Exception {
         super.setUp();
 
-        processor = new MockMonitorProcessor();
+        processor = new MockMonitorProcessor() {
+            public void monitorStarted(Monitor monitor) {
+                // noop
+            }
+
+            public void monitorCreated(Monitor monitor) {
+                // noop
+            }
+        };
 
         factory = new MockMonitorProcessorFactory(
                 new MonitorProcessor[]{processor});
@@ -53,7 +61,7 @@ public class TimeWindowMonitorThrottleTest extends TestCase {
         }
     }
 
-    public void testInvalidUniqueMonitorNamePerWindowLimit() {
+    public void testInvalidMonitorPerWindowLimit() {
         try {
             new TimeWindowMonitorThrottle(1, 1, 0);
         } catch (IllegalArgumentException e) {
@@ -143,7 +151,7 @@ public class TimeWindowMonitorThrottleTest extends TestCase {
         assertEquals(3, m.getAsInt("uniqueOverflowCount"));
     }
 
-    public void testThrottleThreeSecondWindow() throws Exception {
+    public void testThrottleAcrossWindowBoundary() throws Exception {
         // 1 second window, 1 unique monitor name, 100 monitor instances per window
         MonitorThrottle throttle = new TimeWindowMonitorThrottle(1, 1, 100);
 

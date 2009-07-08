@@ -32,7 +32,7 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
 
     private boolean enabled = true;
     private boolean allowEssentialLevelOnly = false;
-    
+
     private AtomicInteger totalWindowCount = new AtomicInteger(0);
     private AtomicInteger uniqueOverflowCount = new AtomicInteger(0);
     private AtomicInteger totalThrottledCount = new AtomicInteger(0);
@@ -205,7 +205,7 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
      * Passing the same monitor instance to shouldAllow(monitor) more than once may produce
      * a different result each time.
      *
-     * @return false
+     * @return true
      */
     public boolean isIdempotent() {
         return true;
@@ -286,7 +286,8 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
         private void resetTotalMonitorCount() {
             int count = totalWindowCount.getAndSet(0);
             if (count > monitorCountPerWindowLimit) {
-                EventMonitor m = new EventMonitor(MonitorThrottle.THROTTLE_MONITOR_NAME);
+                EventMonitor m = new EventMonitor(MonitorThrottle.THROTTLE_MONITOR_NAME,
+                        MonitoringLevel.ESSENTIAL);
                 m.set("windowThrottledCount", (count - monitorCountPerWindowLimit));
                 m.set("totalThrottledCount", totalThrottledCount.get());
                 m.fire();
@@ -296,7 +297,8 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
         private void checkUniqueCount() {
             int count = uniqueOverflowCount.get();
             if (count != 0) {
-                EventMonitor m = new EventMonitor(MonitorThrottle.TOO_MANY_UNIQUE_NAMES);
+                EventMonitor m = new EventMonitor(MonitorThrottle.TOO_MANY_UNIQUE_NAMES,
+                        MonitoringLevel.ESSENTIAL);
                 m.set("uniqueOverflowCount", count);
                 m.set("essentialOnly", allowEssentialLevelOnly);
                 m.fire();
@@ -306,9 +308,12 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
                 if (! allowEssentialLevelOnly) {
                     allowEssentialLevelOnly = true;
                     resetUniqueNameState();
-                    log.warn("ERMA MonitoringLevel raised to ESSENTIAL - too many unique monitors.");
+                    log.warn("ERMA MonitoringLevel raised to ESSENTIAL - too many unique monitors. " +
+                            "Will continue to discard non-ESSENTIAL monitors until an instrumentation " +
+                            "patch is applied and this vm is restarted.");
                 } else {
-                    log.warn("ERMA throttling to ESSENTIAL - too many unique.  Instrumentation patch needed.");
+                    log.warn("ERMA throttling to ESSENTIAL - still too many unique ESSENTIAL monitor names. " +
+                            "Instrumentation patch needed.");
                 }
             }
         }
