@@ -4,13 +4,12 @@ import com.orbitz.monitoring.api.monitor.EventMonitor;
 import com.orbitz.monitoring.api.MonitorThrottle;
 import com.orbitz.monitoring.api.Monitor;
 import com.orbitz.monitoring.api.MonitoringLevel;
-import edu.emory.mathcs.backport.java.util.concurrent.ConcurrentHashMap;
 import edu.emory.mathcs.backport.java.util.concurrent.ScheduledThreadPoolExecutor;
 import edu.emory.mathcs.backport.java.util.concurrent.TimeUnit;
 //import edu.emory.mathcs.backport.java.util.concurrent.atomic.AtomicInteger;
 
-import java.util.Iterator;
-import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.log4j.Logger;
@@ -27,21 +26,23 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
 
     private static final int DEFAULT_TIME_WINDOW_SECONDS = 60;
     private static final int DEFAULT_UNIQUE_MONITOR_NAME_LIMIT = 10000;
-    private static final int DEFAULT_UNIQUE_MONITOR_NAME_PER_WINDOW_LIMIT = 600;
+    private static final int DEFAULT_PER_WINDOW_LIMIT = 100000;
 
     private final String THROTTLE_RESULT_ATTRIBUTE =
             "TimeWindowMonitorThrottle_" + this.hashCode() + "_allowed";
 
     private boolean enabled = true;
     private boolean allowEssentialLevelOnly = false;
+    
+    private AtomicInteger totalWindowCount = new AtomicInteger(0);
     private AtomicInteger uniqueOverflowCount = new AtomicInteger(0);
     private AtomicInteger totalThrottledCount = new AtomicInteger(0);
 
     private int timeWindowSizeSeconds;
     private int uniqueMonitorNameLimit;
-    private int uniqueMonitorNamePerWindowLimit;
+    private int monitorCountPerWindowLimit;
 
-    private Map monitorMap;
+    private Set monitorNameSet;
     private ScheduledThreadPoolExecutor windowExecutor;
 
     /**
@@ -50,7 +51,7 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
     public TimeWindowMonitorThrottle() {
         this(DEFAULT_TIME_WINDOW_SECONDS,
                 DEFAULT_UNIQUE_MONITOR_NAME_LIMIT,
-                DEFAULT_UNIQUE_MONITOR_NAME_PER_WINDOW_LIMIT);
+                DEFAULT_PER_WINDOW_LIMIT);
     }
 
     /**
@@ -58,10 +59,10 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
      *
      * @param timeWindowSizeSeconds size of time window in seconds
      * @param uniqueMonitorNameLimit number of keys allowed in monitor name map
-     * @param uniqueMonitorNamePerWindowLimit throttle limit for each monitor name
+     * @param monitorCountPerWindowLimit throttle limit for each monitor name
      */
     public TimeWindowMonitorThrottle(int timeWindowSizeSeconds, int uniqueMonitorNameLimit,
-                int uniqueMonitorNamePerWindowLimit) {
+                int monitorCountPerWindowLimit) {
         if (timeWindowSizeSeconds < 1) {
             throw new IllegalArgumentException("timeWindowSizeSeconds=" + timeWindowSizeSeconds +
                     ": window size must be at least 1 second");
@@ -72,16 +73,17 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
                     ": must allow at least 1 unique monitor name");
         }
 
-        if (uniqueMonitorNamePerWindowLimit < 1) {
-            throw new IllegalArgumentException("uniqueMonitorNamePerWindowLimit=" +
-                    uniqueMonitorNamePerWindowLimit + ": invalid limit, must be at least 1");
+        if (monitorCountPerWindowLimit < 1) {
+            throw new IllegalArgumentException("monitorCountPerWindowLimit=" +
+                    monitorCountPerWindowLimit + ": invalid limit, must be at least 1");
         }
 
         this.timeWindowSizeSeconds = timeWindowSizeSeconds;
         this.uniqueMonitorNameLimit = uniqueMonitorNameLimit;
-        this.uniqueMonitorNamePerWindowLimit = uniqueMonitorNamePerWindowLimit;
+        this.monitorCountPerWindowLimit = monitorCountPerWindowLimit;
 
-        this.monitorMap = new ConcurrentHashMap(uniqueMonitorNameLimit);
+        // TODO - make this a concurrent data structure
+        this.monitorNameSet = new HashSet();
 
         startWindowManager();
     }
@@ -103,8 +105,7 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
      * OR
      * <li>The monitor name exceeds the uniqueMonitorNameLimit</li>
      * OR
-     * <li>The monitor name has been seen more than uniqueMonitorNamePerWindowLimit times
-     *          in the current window</li>
+     * <li>The monitor exceeds the total permitted per time window</li>
      *
      * @param monitor instance to throttle check
      * @return false if the monitor instance should be throttled
@@ -144,15 +145,16 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
         String name = monitor.getAsString(Monitor.NAME);
         name = (name == null) ? "<null>" : name;
 
-        boolean allow;
-        if (monitorMap.containsKey(name)) {
-            AtomicInteger aCount = (AtomicInteger) monitorMap.get(name);
-            int count = aCount.incrementAndGet();
-            allow = (count <= uniqueMonitorNamePerWindowLimit);
-        } else {
-            allow = allowNewMonitor(name);
-            if (allow) {
-                monitorMap.put(name, new AtomicInteger(1));
+        boolean allow = (monitorNameSet.contains(name) || allowNewMonitor(name));
+
+        if (allow) {
+            int currentCount = totalWindowCount.incrementAndGet();
+            if (currentCount > monitorCountPerWindowLimit) {
+                allow = false;
+                if (log.isDebugEnabled()) {
+                    log.debug("Throttling monitor, exceeded per window limit, count=" +
+                            currentCount + ", limit=" + monitorCountPerWindowLimit);
+                }
             }
         }
 
@@ -171,11 +173,11 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
     }
 
     private boolean allowNewMonitor(String name) {
-        int snapshotMapSize = monitorMap.size();
-        boolean tooManyUniqueNames = (snapshotMapSize >= uniqueMonitorNameLimit);
+        int setSize = monitorNameSet.size();
+        boolean tooManyUniqueNames = (setSize >= uniqueMonitorNameLimit);
         if (tooManyUniqueNames) {
             if (log.isDebugEnabled()) {
-                log.debug("Unique count=" + snapshotMapSize + ".  Dropping monitor name: " + name);
+                log.debug("Unique count=" + setSize + ".  Dropping monitor name: " + name);
             }
             uniqueOverflowCount.incrementAndGet();
         }
@@ -204,22 +206,21 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
      * @return false
      */
     public boolean isIdempotent() {
-        return false;
+        return true;
     }
 
     /**
      * Resets all internal state used to make throttling decisions.
      */
     public void reset() {
-        clearAllCounts();
+        resetUniqueNameState();
         allowEssentialLevelOnly = false;
         enabled = true;
     }
 
-    private void clearAllCounts() {
-        monitorMap.clear();
+    private void resetUniqueNameState() {
+        monitorNameSet.clear();
         uniqueOverflowCount.set(0);
-        totalThrottledCount.set(0);
     }
 
     public void shutdown() {
@@ -243,12 +244,12 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
         this.uniqueMonitorNameLimit = uniqueMonitorNameLimit;
     }
 
-    public int getUniqueMonitorNamePerWindowLimit() {
-        return uniqueMonitorNamePerWindowLimit;
+    public int getMonitorCountPerWindowLimit() {
+        return monitorCountPerWindowLimit;
     }
 
-    public void setUniqueMonitorNamePerWindowLimit(int uniqueMonitorNamePerWindowLimit) {
-        this.uniqueMonitorNamePerWindowLimit = uniqueMonitorNamePerWindowLimit;
+    public void setMonitorCountPerWindowLimit(int monitorCountPerWindowLimit) {
+        this.monitorCountPerWindowLimit = monitorCountPerWindowLimit;
     }
 
     public int getTotalThrottledCount() {
@@ -264,31 +265,17 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
     private class WindowManagerRunnable implements Runnable {
 
         public void run() {
-            resetMonitorCounts();
+            resetTotalMonitorCount();
             checkUniqueCount();
         }
 
-        private void resetMonitorCounts() {
-            Iterator entries = monitorMap.entrySet().iterator();
-            while (entries.hasNext()) {
-                Map.Entry entry = (Map.Entry) entries.next();
-                String monitorName = (String) entry.getKey();
-
-                // get current count and reset to zero atomically
-                int count = ((AtomicInteger) entry.getValue()).getAndSet(0);
-
-                if (count > uniqueMonitorNamePerWindowLimit) {
-                    if (log.isDebugEnabled()) {
-                        log.debug("Reached limit of " + uniqueMonitorNamePerWindowLimit +
-                                " for monitor name: " + monitorName);
-                    }
-
-                    EventMonitor m = new EventMonitor(MonitorThrottle.THROTTLE_MONITOR_NAME);
-                    m.set("throttledMonitorName", monitorName);
-                    m.set("throttledCount", (count - uniqueMonitorNamePerWindowLimit));
-                    m.set("totalThrottledCount", totalThrottledCount.get());
-                    m.fire();
-                }
+        private void resetTotalMonitorCount() {
+            int count = totalWindowCount.getAndSet(0);
+            if (count > monitorCountPerWindowLimit) {
+                EventMonitor m = new EventMonitor(MonitorThrottle.THROTTLE_MONITOR_NAME);
+                m.set("windowThrottledCount", (count - monitorCountPerWindowLimit));
+                m.set("totalThrottledCount", totalThrottledCount.get());
+                m.fire();
             }
         }
 
@@ -304,7 +291,7 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
                 // it hasn't already been attempted once
                 if (! allowEssentialLevelOnly) {
                     allowEssentialLevelOnly = true;
-                    clearAllCounts();
+                    resetUniqueNameState();
                     log.warn("ERMA MonitoringLevel raised to ESSENTIAL - too many unique monitors.");
                 } else {
                     log.warn("ERMA throttling to ESSENTIAL - too many unique.  Instrumentation patch needed.");
