@@ -6,11 +6,10 @@ import com.orbitz.monitoring.api.Monitor;
 import com.orbitz.monitoring.api.MonitoringLevel;
 import edu.emory.mathcs.backport.java.util.concurrent.ScheduledThreadPoolExecutor;
 import edu.emory.mathcs.backport.java.util.concurrent.TimeUnit;
-//import edu.emory.mathcs.backport.java.util.concurrent.atomic.AtomicInteger;
+import edu.emory.mathcs.backport.java.util.concurrent.atomic.AtomicInteger;
 
 import java.util.Set;
 import java.util.HashSet;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.log4j.Logger;
 
@@ -145,10 +144,11 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
         String name = monitor.getAsString(Monitor.NAME);
         name = (name == null) ? "<null>" : name;
 
+        int currentCount = totalWindowCount.incrementAndGet();
+
         boolean allow = (monitorNameSet.contains(name) || allowNewMonitor(name));
 
         if (allow) {
-            int currentCount = totalWindowCount.incrementAndGet();
             if (currentCount > monitorCountPerWindowLimit) {
                 allow = false;
                 if (log.isDebugEnabled()) {
@@ -174,15 +174,17 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
 
     private boolean allowNewMonitor(String name) {
         int setSize = monitorNameSet.size();
-        boolean tooManyUniqueNames = (setSize >= uniqueMonitorNameLimit);
-        if (tooManyUniqueNames) {
+        boolean underUniqueLimit = (setSize < uniqueMonitorNameLimit);
+        if (underUniqueLimit) {
+            monitorNameSet.add(name);    
+        } else {
             if (log.isDebugEnabled()) {
                 log.debug("Unique count=" + setSize + ".  Dropping monitor name: " + name);
             }
             uniqueOverflowCount.incrementAndGet();
         }
 
-        return (! tooManyUniqueNames);
+        return underUniqueLimit;
     }
 
     /**
@@ -254,6 +256,18 @@ public class TimeWindowMonitorThrottle implements MonitorThrottle {
 
     public int getTotalThrottledCount() {
         return totalThrottledCount.get();
+    }
+
+    public MonitoringLevel getThrottlingLevel() {
+        if (this.allowEssentialLevelOnly) {
+            return MonitoringLevel.ESSENTIAL;
+        } else {
+            return MonitoringLevel.DEBUG;
+        }
+    }
+
+    public int getUniqueOverflowCount() {
+        return uniqueOverflowCount.get();
     }
 
     private void startWindowManager() {

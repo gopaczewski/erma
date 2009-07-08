@@ -20,5 +20,7 @@ public interface MonitorThrottle {
 
     int getTotalThrottledCount();
 
+    MonitoringLevel getThrottlingLevel();
+
     boolean isIdempotent();
 }

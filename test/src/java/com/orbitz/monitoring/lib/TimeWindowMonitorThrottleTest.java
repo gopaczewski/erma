@@ -11,7 +11,6 @@ import com.orbitz.monitoring.api.MonitoringLevel;
 import com.orbitz.monitoring.test.MockMonitorProcessor;
 import com.orbitz.monitoring.test.MockMonitorProcessorFactory;
 import com.orbitz.monitoring.test.MockDecomposer;
-import com.orbitz.monitoring.lib.TimeWindowMonitorThrottle;
 
 /**
  * Test cases for TimeWindowMonitorThrottle
@@ -67,9 +66,22 @@ public class TimeWindowMonitorThrottleTest extends TestCase {
         assertTrue(throttle.shouldAllow(new EventMonitor(null)));
     }
 
-    public void testThrottleMonitorBeforeProcessing() {
+    public void testDisableThrottling() {
         MonitorThrottle throttle = new TimeWindowMonitorThrottle();
-        assertTrue(throttle.shouldAllow(new EventMonitor("foo")));
+        throttle.disable();
+        for (int i=0; i < 100001; i++) {
+            assertTrue(throttle.shouldAllow(new EventMonitor("m" + i)));
+        }
+    }
+
+    public void testIdemptotentAllow() {
+        MonitorThrottle throttle = new TimeWindowMonitorThrottle();
+        Monitor sameMonitor = new EventMonitor("foo");
+
+        assertTrue(throttle.shouldAllow(sameMonitor));
+        for (int i=0; i < 100001; i++) {
+            assertTrue(throttle.shouldAllow(sameMonitor));                        
+        }
     }
 
     public void testTooManyUniqueNames() throws Exception {
@@ -84,7 +96,7 @@ public class TimeWindowMonitorThrottleTest extends TestCase {
 
         // poll for indication background thread in throttle has run
         int pollCount = 0;
-        while (throttle.getTotalThrottledCount() != 0) {
+        while (! throttle.getThrottlingLevel().equals(MonitoringLevel.ESSENTIAL)) {
             Thread.sleep(100);
             if (++pollCount > 20) {
                 fail("waited too long for throttle reset");
@@ -111,18 +123,24 @@ public class TimeWindowMonitorThrottleTest extends TestCase {
         // now will exceed max of 2 unique names at ESSENTIAL only level
         assertFalse(throttle.shouldAllow(new EventMonitor("eight", MonitoringLevel.ESSENTIAL)));
         assertFalse(throttle.shouldAllow(new EventMonitor("nine", MonitoringLevel.ESSENTIAL)));
-        assertFalse(throttle.shouldAllow(new EventMonitor("ten", MonitoringLevel.INFO)));
 
-        // throttled "four", "five", "eight", "nine", "ten"
-        assertEquals(5, throttle.getTotalThrottledCount());
+
+        Monitor monitorTen = new EventMonitor("ten", MonitoringLevel.ESSENTIAL);
+        // throttled by level the first time..
+        assertFalse(throttle.shouldAllow(monitorTen));
+        // throttled by the fact it was throttled before (by Monitor attribute) the second time...
+        assertFalse(throttle.shouldAllow(monitorTen));        
+
+        // "three", "four", "five", "eight", "nine", "ten"(once)
+        assertEquals(6, throttle.getTotalThrottledCount());
 
         Thread.sleep(1000);
 
         monitors = processor.extractProcessObjects();
         m = monitors[0];
-        
+
         assertEquals(MonitorThrottle.TOO_MANY_UNIQUE_NAMES, m.get(Monitor.NAME));
-        assertEquals(2, m.getAsInt("uniqueOverflowCount"));
+        assertEquals(3, m.getAsInt("uniqueOverflowCount"));
     }
 
     public void testThrottleThreeSecondWindow() throws Exception {
@@ -159,7 +177,7 @@ public class TimeWindowMonitorThrottleTest extends TestCase {
         for (Monitor m : monitors) {
             if (EventMonitor.class.isAssignableFrom(m.getClass())) {
                 if (MonitorThrottle.THROTTLE_MONITOR_NAME.equals(m.get(Monitor.NAME))) {
-                    count += m.getAsInt("throttledCount");
+                    count += m.getAsInt("windowThrottledCount");
                 }
             }
         }
